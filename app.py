@@ -1,8 +1,9 @@
+import logging
 import discord
 from discord.ext import commands
 
-from YouTubeManager import extract_audio_url
-from config import DISCORD_TOKEN
+from MieszanyMieszany.YouTubeManager import extract_audio_url
+from config import ALLOWED_CHANNELS, DISCORD_TOKEN
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -17,9 +18,13 @@ FFMPEG_OPTIONS = {
 async def on_ready():
     print(f'Bot is ready. Logged in as {bot.user}')
 
-@bot.command(name='play', help='Plays a song from YouTube. If a search query is given, it plays the first result.')
+@bot.check
+async def only_allowed_channels(ctx):
+    return ctx.channel.id in ALLOWED_CHANNELS
+
+@bot.command(name='play', help='Plays a song from YouTube. If search query - plays the first result.')
 async def play(ctx, *, url):
-    voice_channel = ctx.author.voice.channel
+    voice_channel = ctx.author.voice and ctx.author.voice.channel
 
     if not voice_channel:
         await ctx.send("You're not connected to a voice channel!")
@@ -73,4 +78,4 @@ async def stop(ctx):
         await ctx.send("No music is playing right now.")
 
 
-bot.run(DISCORD_TOKEN)
+bot.run(DISCORD_TOKEN, log_level=logging.WARN)
