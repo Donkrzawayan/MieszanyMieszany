@@ -30,9 +30,7 @@ class MusicBot(commands.Cog):
             audio_url, source_url = extract_audio_url(next_song)
             ctx.voice_client.play(
                 discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS),
-                after=lambda e: asyncio.run_coroutine_threadsafe(
-                    self.play_next(ctx), self.bot.loop
-                ),
+                after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.bot.loop),
             )
             await ctx.send(f"Now playing: {source_url}")
 
@@ -40,10 +38,7 @@ class MusicBot(commands.Cog):
     async def only_allowed_channels(self, ctx):
         return ctx.channel.id in ALLOWED_CHANNELS
 
-    @commands.command(
-        name="play",
-        help="Plays a song from YouTube. If search query - plays the first result.",
-    )
+    @commands.command(name="play", help="Plays a song from YouTube. If search query - plays the first result.")
     async def play(self, ctx, *, query: str):
         if ctx.voice_client is None:
             if ctx.author.voice:
@@ -81,12 +76,7 @@ class MusicBot(commands.Cog):
     async def queue(self, ctx):
         guild_id = ctx.guild.id
         if guild_id in self.song_queue and self.song_queue[guild_id]:
-            queue_list = "\n".join(
-                [
-                    f"{idx + 1}. {song}"
-                    for idx, song in enumerate(self.song_queue[guild_id])
-                ]
-            )
+            queue_list = "\n".join([f"{idx + 1}. {song}" for idx, song in enumerate(self.song_queue[guild_id])])
             await ctx.send(f"Current queue:\n{queue_list}")
         else:
             await ctx.send("The queue is empty.")
@@ -119,9 +109,7 @@ class MusicBot(commands.Cog):
 
                         last_channel = self.last_used_channel.get(guild.id)
                         if last_channel is not None:
-                            await last_channel.send(
-                                "Disconnected from the voice channel due to inactivity."
-                            )
+                            await last_channel.send("Disconnected from the voice channel due to inactivity.")
 
     @check_inactivity.before_loop
     async def before_check_inactivity(self):
