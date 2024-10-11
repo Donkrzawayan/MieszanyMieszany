@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import discord
 from discord.ext import commands
@@ -14,6 +15,17 @@ FFMPEG_OPTIONS = {
     'options': '-vn'
 }
 
+song_queue = {}
+
+async def play_next(ctx):
+    guild_id = ctx.guild.id
+    if song_queue[guild_id]:
+        # Get the next song in queue
+        next_song = song_queue[guild_id].pop(0)
+        audio_url, source_url = extract_audio_url(next_song)
+        ctx.voice_client.play(discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS), after=lambda e: asyncio.run_coroutine_threadsafe(play_next(ctx), bot.loop))
+        await ctx.send(f'Now playing: {source_url}')
+
 @bot.event
 async def on_ready():
     print(f'Bot is ready. Logged in as {bot.user}')
@@ -23,59 +35,61 @@ async def only_allowed_channels(ctx):
     return ctx.channel.id in ALLOWED_CHANNELS
 
 @bot.command(name='play', help='Plays a song from YouTube. If search query - plays the first result.')
-async def play(ctx, *, url):
-    voice_channel = ctx.author.voice and ctx.author.voice.channel
+async def play(ctx, *, query: str):
+    if ctx.voice_client is None:
+        if ctx.author.voice:
+            await ctx.author.voice.channel.connect()
+        else:
+            await ctx.send("You're not connected to a voice channel!")
+            return
 
-    if not voice_channel:
-        await ctx.send("You're not connected to a voice channel!")
-        return
+    guild_id = ctx.guild.id
 
-    voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-    if not voice_client:
-        voice_client = await voice_channel.connect()
-
-    if voice_client.is_playing():
-        voice_client.stop()
-
-    audio_url, source_url = extract_audio_url(url)
-    voice_client.play(discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS))
-    await ctx.send(f'Now playing: {source_url}')
+    if guild_id not in song_queue:
+        song_queue[guild_id] = []
+    
+    song_queue[guild_id].append(query)
+    if ctx.voice_client.is_playing():
+        await ctx.send(f"Added to queue: {query}")
+    else:
+        await play_next(ctx)
 
 @bot.command(name='leave', help='Makes the bot leave the voice channel.')
 async def leave(ctx):
-    voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-    if voice_client.is_connected():
-        await voice_client.disconnect()
+    if ctx.voice_client is not None:
+        guild_id = ctx.guild.id
+        song_queue[guild_id].clear()
+        await ctx.voice_client.disconnect()
         await ctx.send("Disconnected from the voice channel.")
-    else:
-        await ctx.send("I'm not in a voice channel.")
 
-@bot.command(name='pause', help='Pauses the current song.')
-async def pause(ctx):
-    voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-    if voice_client.is_playing():
-        voice_client.pause()
-        await ctx.send("Music paused.")
-    else:
-        await ctx.send("No music is playing right now.")
+@bot.command(name='skip', help='Skips current song')
+async def skip(ctx):
+    if ctx.voice_client.is_playing():
+        await ctx.send("Skipped the current song.")
+        ctx.voice_client.stop() # trigger play_next via after callback
 
-@bot.command(name='resume', help='Resumes the paused song.')
-async def resume(ctx):
-    voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-    if voice_client.is_paused():
-        voice_client.resume()
-        await ctx.send("Music resumed.")
+@bot.command(name='queue', help='Lists current queue.')
+async def queue(ctx):
+    guild_id = ctx.guild.id
+    if guild_id in song_queue and song_queue[guild_id]:
+        queue_list = "\n".join([f"{idx + 1}. {song}" for idx, song in enumerate(song_queue[guild_id])])
+        await ctx.send(f"Current queue:\n{queue_list}")
     else:
-        await ctx.send("No music is paused right now.")
+        await ctx.send("The queue is empty.")
+
+@bot.command(name='clear', help='Clear the queue.')
+async def clear(ctx):
+    guild_id = ctx.guild.id
+    if guild_id in song_queue:
+        song_queue[guild_id].clear()
+        await ctx.send("Cleared the queue.")
 
 @bot.command(name='stop', help='Stops the current song.')
 async def stop(ctx):
-    voice_client = discord.utils.get(bot.voice_clients, guild=ctx.guild)
-    if voice_client.is_playing():
-        voice_client.stop()
-        await ctx.send("Music stopped.")
-    else:
-        await ctx.send("No music is playing right now.")
-
+    guild_id = ctx.guild.id
+    if ctx.voice_client is not None:
+        song_queue[guild_id].clear()
+        ctx.voice_client.stop()
+        await ctx.send("Music stopped and queue cleared.")
 
 bot.run(DISCORD_TOKEN, log_level=logging.WARN)
