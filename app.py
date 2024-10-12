@@ -3,8 +3,9 @@ import logging
 import discord
 from discord.ext import commands, tasks
 
+from MieszanyMieszany.StatsHolder import StatsHolder
 from MieszanyMieszany.YouTubeManager import extract_audio_url
-from config import ALLOWED_CHANNELS, DISCONNECT_AFTER, DISCORD_TOKEN
+from config import ADMIN_ID, ALLOWED_CHANNELS, DISCONNECT_AFTER, DISCORD_TOKEN
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -21,17 +22,18 @@ class MusicBot(commands.Cog):
         self.song_queue = {}
         self.last_used_channel = {}
         self.check_inactivity.start()
+        self.stats = StatsHolder()
 
     async def play_next(self, ctx):
         guild_id = ctx.guild.id
         if self.song_queue[guild_id]:
-            # Get the next song in queue
             next_song = self.song_queue[guild_id].pop(0)
             audio_url, source_url = extract_audio_url(next_song)
             ctx.voice_client.play(
                 discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS),
                 after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.bot.loop),
             )
+            self.stats.increment_song_counter(guild_id)
             await ctx.send(f"Now playing: {source_url}")
 
     @commands.check
@@ -104,7 +106,6 @@ class MusicBot(commands.Cog):
                 if guild.id not in self.song_queue or not self.song_queue[guild.id]:
                     await asyncio.sleep(DISCONNECT_AFTER)
                     if guild.voice_client and not guild.voice_client.is_playing():
-                        self.song_queue[guild.id].clear()
                         await guild.voice_client.disconnect()
 
                         last_channel = self.last_used_channel.get(guild.id)
@@ -123,6 +124,24 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 async def on_ready():
     print(f"Bot is ready. Logged in as {bot.user}")
     await bot.add_cog(MusicBot(bot))
+
+
+@bot.command(name="stats", help="Shows server stats")
+async def stats(ctx):
+    guild_id = ctx.guild.id
+    count = StatsHolder().get_count(guild_id)
+    await ctx.send(f"Songs played: {count}")
+
+
+def is_admin(ctx):
+    return ctx.author.id == ADMIN_ID
+
+
+@bot.command(name="createdb")
+@commands.check(is_admin)
+async def createdb(ctx):
+    StatsHolder().create_db()
+    print("Datbase created.")
 
 
 bot.run(DISCORD_TOKEN, log_level=logging.WARN)
