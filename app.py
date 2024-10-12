@@ -145,7 +145,9 @@ async def createdb(ctx):
     StatsHolder().create_db()
     print("Datbase created.")
 
+
 meeting_tracker = MeetingTracker()
+
 
 @bot.event
 async def on_voice_state_update(member, before, after):
