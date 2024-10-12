@@ -3,12 +3,14 @@ import logging
 import discord
 from discord.ext import commands, tasks
 
+from MieszanyMieszany.MeetingTracker import MeetingTracker
 from MieszanyMieszany.StatsHolder import StatsHolder
 from MieszanyMieszany.YouTubeManager import extract_audio_url
-from config import ADMIN_ID, ALLOWED_CHANNELS, DISCONNECT_AFTER, DISCORD_TOKEN
+from config import ADMIN_ID, ALLOWED_CHANNELS, BOT_CHANNELS, DISCONNECT_AFTER, DISCORD_TOKEN
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.voice_states = True
 
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
@@ -142,6 +144,19 @@ def is_admin(ctx):
 async def createdb(ctx):
     StatsHolder().create_db()
     print("Datbase created.")
+
+meeting_tracker = MeetingTracker()
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    duration = meeting_tracker.update_voice_state(member, before, after)
+    if duration:
+        guild = before.channel.guild
+        if guild.id in BOT_CHANNELS:
+            bot_channel_id = BOT_CHANNELS[guild.id]
+            bot_channel = guild.get_channel(bot_channel_id)
+            if bot_channel:
+                await bot_channel.send(f"Meeting in {before.channel.name} lasted {duration}.")
 
 
 bot.run(DISCORD_TOKEN, log_level=logging.WARN)
