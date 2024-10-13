@@ -135,6 +135,18 @@ async def stats(ctx):
     await ctx.send(f"Songs played: {count}")
 
 
+@bot.command(name="uptime", help="Shows how much the current meeting lasts")
+async def uptime(ctx):
+    user_voice = ctx.author.voice
+    if not user_voice:
+        await ctx.send("You're not connected to a voice channel!")
+        return
+
+    time = meeting_tracker.cuttent_meeting(user_voice.channel)
+    if time is not None:
+        await ctx.send(f"Meeting in {user_voice.channel.name} lasts {time}.")
+
+
 def is_admin(ctx):
     return ctx.author.id == ADMIN_ID
 
