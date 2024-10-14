@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+from MieszanyMieszany import StatsHolder
+
 
 class MeetingTracker:
     def __init__(self):
@@ -8,7 +10,10 @@ class MeetingTracker:
     def _end_meeting(self, channel):
         start_time = self.meetings.pop(channel.id, None)
         if start_time:
-            return datetime.now(UTC) - start_time
+            end_time = datetime.now(UTC)
+            StatsHolder.add_meeting(channel.guild.id, start_time, end_time)
+            timedelta = end_time - start_time
+            return StatsHolder.hhmmss_format(timedelta.total_seconds())
 
     def _start_meeting(self, channel):
         self.meetings[channel.id] = datetime.now(UTC)
@@ -28,4 +33,5 @@ class MeetingTracker:
     def cuttent_meeting(self, channel):
         if self.meetings[channel.id] and len(channel.members) >= 2:
             start_time = self.meetings[channel.id]
-            return datetime.now(UTC) - start_time
+            timedelta = datetime.now(UTC) - start_time
+            return StatsHolder.hhmmss_format(timedelta.total_seconds())

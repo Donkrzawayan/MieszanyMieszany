@@ -3,8 +3,8 @@ import logging
 import discord
 from discord.ext import commands, tasks
 
+from MieszanyMieszany import StatsHolder
 from MieszanyMieszany.MeetingTracker import MeetingTracker
-from MieszanyMieszany.StatsHolder import StatsHolder
 from MieszanyMieszany.YouTubeManager import extract_audio_url
 from config import ADMIN_ID, ALLOWED_CHANNELS, BOT_CHANNELS, DISCONNECT_AFTER, DISCORD_TOKEN
 
@@ -24,7 +24,7 @@ class MusicBot(commands.Cog):
         self.song_queue = {}
         self.last_used_channel = {}
         self.check_inactivity.start()
-        self.stats = StatsHolder()
+        self.stats = StatsHolder
 
     async def play_next(self, ctx):
         guild_id = ctx.guild.id
@@ -134,8 +134,10 @@ async def only_allowed_channels(ctx):
 @bot.command(name="stats", help="Shows server stats")
 async def stats(ctx):
     guild_id = ctx.guild.id
-    count = StatsHolder().get_count(guild_id)
-    await ctx.send(f"Songs played: {count}")
+    count = StatsHolder.get_count(guild_id)
+    top = StatsHolder.top3_meetings(guild_id)
+    top_list = "\n".join([f"{idx + 1}.\t{start}\t{duration}" for idx, (start, duration) in enumerate(top)])
+    await ctx.send(f"Songs played: {count}\nTop 3 meetings:```{top_list}```")
 
 
 @bot.command(name="uptime", help="Shows how much the current meeting lasts")
@@ -157,7 +159,7 @@ def is_admin(ctx):
 @bot.command(name="createdb")
 @commands.check(is_admin)
 async def createdb(ctx):
-    StatsHolder().create_db()
+    StatsHolder.create_db()
     print("Datbase created.")
 
 
