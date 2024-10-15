@@ -167,3 +167,6 @@ config.py
 
 # Database
 *.sqlite3
+
+# Logs folder
+logs/

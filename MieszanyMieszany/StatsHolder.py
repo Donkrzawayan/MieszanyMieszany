@@ -39,7 +39,7 @@ def get_count(guild_id):
 
 def add_meeting(guild_id, start, end):
     with sqlite3.connect(DATABASE) as cur:
-        cur.execute("INSERT OR IGNORE INTO voice_meeting (guild_id, start, end) VALUES(?,?,?)", (guild_id, start, end))
+        cur.execute("INSERT INTO voice_meeting (guild_id, start, end) VALUES(?,?,?)", (guild_id, start, end))
 
 
 def top3_meetings(guild_id):

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import logging
 import discord
 from discord.ext import commands, tasks
@@ -11,6 +12,8 @@ from config import ADMIN_ID, ALLOWED_CHANNELS, BOT_CHANNELS, DISCONNECT_AFTER, D
 intents = discord.Intents.default()
 intents.message_content = True
 intents.voice_states = True
+meeting_tracker = MeetingTracker()
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 FFMPEG_OPTIONS = {
     "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
@@ -117,9 +120,6 @@ class MusicBot(commands.Cog):
         await self.bot.wait_until_ready()
 
 
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-
 @bot.event
 async def on_ready():
     print(f"Bot is ready. Logged in as {bot.user}")
@@ -163,9 +163,6 @@ async def createdb(ctx):
     print("Datbase created.")
 
 
-meeting_tracker = MeetingTracker()
-
-
 @bot.event
 async def on_voice_state_update(member, before, after):
     duration = meeting_tracker.update_voice_state(member, before, after)
@@ -178,4 +175,6 @@ async def on_voice_state_update(member, before, after):
                 await bot_channel.send(f"Meeting in {before.channel.name} lasted {duration}.")
 
 
-bot.run(DISCORD_TOKEN, log_level=logging.WARN)
+log_filename = f"logs\\discord.{datetime.today().strftime('%Y-%m-%d')}.log"
+handler = logging.FileHandler(filename=log_filename, encoding="utf-8", mode="w")
+bot.run(DISCORD_TOKEN, log_handler=handler, log_level=logging.WARN)
