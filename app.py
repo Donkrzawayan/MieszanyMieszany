@@ -32,14 +32,13 @@ class MusicBot(commands.Cog):
     async def play_next(self, ctx):
         guild_id = ctx.guild.id
         if self.song_queue[guild_id]:
-            next_song = self.song_queue[guild_id].pop(0)
-            audio_url, source_url = extract_audio_url(next_song)
+            audio_url, source_url, title = self.song_queue[guild_id].pop(0)
             ctx.voice_client.play(
                 discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS),
                 after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.bot.loop),
             )
             self.stats.increment_song_counter(guild_id)
-            await ctx.send(f"Now playing: {source_url}")
+            await ctx.send(f"Now playing: [{title}]({source_url})")
 
     @commands.command(name="play", help="Plays a song from YouTube. If search query - plays the first result")
     async def play(self, ctx, *, query: str):
@@ -55,7 +54,8 @@ class MusicBot(commands.Cog):
             self.song_queue[guild_id] = []
         self.last_used_channel[guild_id] = ctx.channel
 
-        self.song_queue[guild_id].append(query)
+        songs = extract_audio_url(query)
+        self.song_queue[guild_id].extend(songs)
         if ctx.voice_client.is_playing():
             await ctx.send(f"Added to queue: {query}")
         else:
@@ -79,8 +79,11 @@ class MusicBot(commands.Cog):
     async def queue(self, ctx):
         guild_id = ctx.guild.id
         if guild_id in self.song_queue and self.song_queue[guild_id]:
-            queue_list = "\n".join([f"{idx + 1}. {song}" for idx, song in enumerate(self.song_queue[guild_id])])
-            await ctx.send(f"Current queue:\n{queue_list}")
+            queue_list = "\n".join(
+                [f"{idx + 1}. [{song[2]}]({song[1]})" for idx, song in enumerate(self.song_queue[guild_id])]
+            )
+            msg = await ctx.send(f"Current queue:\n{queue_list}")
+            await msg.edit(suppress=True)
         else:
             await ctx.send("The queue is empty.")
 
