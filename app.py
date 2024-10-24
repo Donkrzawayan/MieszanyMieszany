@@ -25,7 +25,6 @@ class MusicBot(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.song_queue = {}
-        self.last_used_channel = {}
         self.check_inactivity.start()
         self.stats = StatsHolder
 
@@ -52,7 +51,6 @@ class MusicBot(commands.Cog):
         guild_id = ctx.guild.id
         if guild_id not in self.song_queue:
             self.song_queue[guild_id] = []
-        self.last_used_channel[guild_id] = ctx.channel
 
         songs = extract_audio_url(query)
         self.song_queue[guild_id].extend(songs)
@@ -105,18 +103,17 @@ class MusicBot(commands.Cog):
     @tasks.loop(minutes=1)
     async def check_inactivity(self):
         for guild in self.bot.guilds:
-            if (
-                guild.voice_client
-                and not guild.voice_client.is_playing()
-                and (guild.id not in self.song_queue or not self.song_queue[guild.id])
-            ):
+            voice = guild.voice_client
+            if voice and not voice.is_playing() and (guild.id not in self.song_queue or not self.song_queue[guild.id]):
                 await asyncio.sleep(DISCONNECT_AFTER)
-                if guild.voice_client and not guild.voice_client.is_playing():
-                    await guild.voice_client.disconnect()
+                if voice and not voice.is_playing():
+                    await voice.disconnect()
 
-                    last_channel = self.last_used_channel.get(guild.id)
-                    if last_channel is not None:
-                        await last_channel.send("Disconnected from the voice channel due to inactivity.")
+                    if guild.id in BOT_CHANNELS:
+                        bot_channel_id = BOT_CHANNELS[guild.id]
+                        bot_channel = guild.get_channel(bot_channel_id)
+                        if bot_channel is not None:
+                            await bot_channel.send("Disconnected from the voice channel due to inactivity.")
 
     @check_inactivity.before_loop
     async def before_check_inactivity(self):
