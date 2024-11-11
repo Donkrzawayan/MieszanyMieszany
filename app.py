@@ -1,6 +1,7 @@
 import asyncio
-from datetime import datetime
 import logging
+from datetime import datetime
+
 import discord
 from discord.ext import commands, tasks
 
@@ -147,7 +148,7 @@ async def uptime(ctx):
         await ctx.send("You're not connected to a voice channel!")
         return
 
-    time = meeting_tracker.cuttent_meeting(user_voice.channel)
+    time = meeting_tracker.current_meeting(user_voice.channel)
     if time is not None:
         await ctx.send(f"Meeting in {user_voice.channel.name} lasts {time}.")
 
@@ -160,7 +161,7 @@ def is_admin(ctx):
 @commands.check(is_admin)
 async def createdb(ctx):
     StatsHolder.create_db()
-    print("Datbase created.")
+    print("Database created.")
 
 
 @bot.event

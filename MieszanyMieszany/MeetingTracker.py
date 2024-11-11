@@ -30,7 +30,7 @@ class MeetingTracker:
             if after.channel.id not in self.meetings or not self.meetings[after.channel.id]:
                 return self._start_meeting(after.channel)
 
-    def cuttent_meeting(self, channel):
+    def current_meeting(self, channel):
         if self.meetings[channel.id] and len(channel.members) >= 2:
             start_time = self.meetings[channel.id]
             timedelta = datetime.now(UTC) - start_time
