@@ -1,181 +1,214 @@
 import asyncio
-import logging
-from datetime import datetime
-
+from collections import deque
+import os
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
+from dotenv import load_dotenv
+import yt_dlp
 
-from MieszanyMieszany import StatsHolder
-from MieszanyMieszany.MeetingTracker import MeetingTracker
-from MieszanyMieszany.YouTubeManager import extract_audio_url
-from config import ADMIN_ID, ALLOWED_CHANNELS, BOT_CHANNELS, DISCONNECT_AFTER, DISCORD_TOKEN
+# Load environment variables from .env file
+load_dotenv()
+TOKEN = os.getenv("TOKEN")
+DISCONNECT_AFTER = int(os.getenv("DISCONNECT_AFTER", 3))
 
+# Bot configuration and intents
 intents = discord.Intents.default()
 intents.message_content = True
-intents.voice_states = True
-meeting_tracker = MeetingTracker()
-bot = commands.Bot(command_prefix="!", intents=intents)
+
+# DefaultHelpCommand enables the built-in !help command
+help_command = commands.DefaultHelpCommand(no_category="Commands")
+bot = commands.Bot(
+    command_prefix="!", intents=intents, help_command=help_command
+)
+
+# yt-dlp and FFmpeg options
+YDL_OPTIONS = {
+    "format": "bestaudio/best",
+    "noplaylist": True,
+    "default_search": "ytsearch",
+    "quiet": True,
+}
 
 FFMPEG_OPTIONS = {
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
+    "before_options": (
+        "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+    ),
     "options": "-vn",
 }
 
+# Dictionaries to store queues and inactivity timers per guild
+queues = {}
+inactivity_tasks = {}
 
-class MusicBot(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
-        self.song_queue = {}
-        self.check_inactivity.start()
-        self.stats = StatsHolder
 
-    async def play_next(self, ctx):
-        guild_id = ctx.guild.id
-        if self.song_queue[guild_id]:
-            audio_url, source_url, title = self.song_queue[guild_id].pop(0)
-            ctx.voice_client.play(
-                discord.FFmpegPCMAudio(audio_url, **FFMPEG_OPTIONS),
-                after=lambda e: asyncio.run_coroutine_threadsafe(self.play_next(ctx), self.bot.loop),
-            )
-            self.stats.increment_song_counter(guild_id)
-            await ctx.send(f"Now playing: [{title}]({source_url})")
+def get_queue(guild_id):
+    if guild_id not in queues:
+        queues[guild_id] = deque()
+    return queues[guild_id]
 
-    @commands.command(name="play", help="Plays a song from YouTube. If search query - plays the first result")
-    async def play(self, ctx, *, query: str):
-        if ctx.voice_client is None:
-            if ctx.author.voice:
-                await ctx.author.voice.channel.connect()
-            else:
-                await ctx.send("You're not connected to a voice channel!")
-                return
 
-        guild_id = ctx.guild.id
-        if guild_id not in self.song_queue:
-            self.song_queue[guild_id] = []
+async def inactivity_disconnect(ctx):
+    """Waits for DISCONNECT_AFTER minutes and disconnects if still inactive."""
+    await asyncio.sleep(DISCONNECT_AFTER * 60)
+    vc = ctx.voice_client
+    if vc and not vc.is_playing() and not vc.is_paused():
+        get_queue(ctx.guild.id).clear()
+        await vc.disconnect()
+        await ctx.send(
+            f"Left the voice channel due to {DISCONNECT_AFTER} minutes of inactivity."
+        )
 
-        songs = extract_audio_url(query)
-        self.song_queue[guild_id].extend(songs)
-        if ctx.voice_client.is_playing():
-            await ctx.send(f"Added to queue: {query}")
-        else:
-            await self.play_next(ctx)
 
-    @commands.command(name="leave", help="Makes the bot leave the voice channel")
-    async def leave(self, ctx):
-        if ctx.voice_client is not None:
-            guild_id = ctx.guild.id
-            self.song_queue[guild_id].clear()
-            await ctx.voice_client.disconnect()
-            await ctx.send("Disconnected from the voice channel.")
+def cancel_inactivity_timer(guild_id):
+    """Cancels the active inactivity timer for a guild if one exists."""
+    task = inactivity_tasks.pop(guild_id, None)
+    if task and not task.done():
+        task.cancel()
 
-    @commands.command(name="skip", help="Skips current song")
-    async def skip(self, ctx):
-        if ctx.voice_client.is_playing():
-            await ctx.send("Skipped the current song.")
-            ctx.voice_client.stop()  # trigger play_next via after callback
 
-    @commands.command(name="queue", help="Lists current queue")
-    async def queue(self, ctx):
-        guild_id = ctx.guild.id
-        if guild_id in self.song_queue and self.song_queue[guild_id]:
-            queue_list = "\n".join(
-                [f"{idx + 1}. [{song[2]}]({song[1]})" for idx, song in enumerate(self.song_queue[guild_id])]
-            )
-            msg = await ctx.send(f"Current queue:\n{queue_list}")
-            await msg.edit(suppress=True)
-        else:
-            await ctx.send("The queue is empty.")
+def start_inactivity_timer(ctx):
+    """Starts a new inactivity timer for a guild."""
+    cancel_inactivity_timer(ctx.guild.id)
+    inactivity_tasks[ctx.guild.id] = bot.loop.create_task(
+        inactivity_disconnect(ctx)
+    )
 
-    @commands.command(name="clear", help="Clears the queue")
-    async def clear(self, ctx):
-        guild_id = ctx.guild.id
-        if guild_id in self.song_queue:
-            self.song_queue[guild_id].clear()
-            await ctx.send("Cleared the queue.")
 
-    @commands.command(name="stop", help="Stops the current song")
-    async def stop(self, ctx):
-        guild_id = ctx.guild.id
-        if ctx.voice_client is not None:
-            self.song_queue[guild_id].clear()
-            ctx.voice_client.stop()
-            await ctx.send("Music stopped and queue cleared")
-
-    @tasks.loop(minutes=1)
-    async def check_inactivity(self):
-        for guild in self.bot.guilds:
-            voice = guild.voice_client
-            if voice and not voice.is_playing() and (guild.id not in self.song_queue or not self.song_queue[guild.id]):
-                await asyncio.sleep(DISCONNECT_AFTER)
-                if voice and not voice.is_playing():
-                    await voice.disconnect()
-
-                    if guild.id in BOT_CHANNELS:
-                        bot_channel_id = BOT_CHANNELS[guild.id]
-                        bot_channel = guild.get_channel(bot_channel_id)
-                        if bot_channel is not None:
-                            await bot_channel.send("Disconnected from the voice channel due to inactivity.")
-
-    @check_inactivity.before_loop
-    async def before_check_inactivity(self):
-        await self.bot.wait_until_ready()
+async def play_next(ctx):
+    """Plays the next song in the queue or starts the inactivity timer."""
+    queue = get_queue(ctx.guild.id)
+    if queue and ctx.voice_client:
+        cancel_inactivity_timer(ctx.guild.id)
+        url, title = queue.popleft()
+        source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
+        ctx.voice_client.play(
+            source,
+            after=lambda e: asyncio.run_coroutine_threadsafe(
+                play_next(ctx), bot.loop
+            ),
+        )
+        await ctx.send(f"Now playing: **{title}**")
+    elif ctx.voice_client:
+        # Queue is empty and playback finished -> start inactivity countdown
+        start_inactivity_timer(ctx)
 
 
 @bot.event
 async def on_ready():
-    print(f"Bot is ready. Logged in as {bot.user}")
-    await bot.add_cog(MusicBot(bot))
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    print("------")
 
 
-@bot.check
-async def only_allowed_channels(ctx):
-    return ctx.channel.id in ALLOWED_CHANNELS
-
-
-@bot.command(name="stats", help="Shows server stats")
-async def stats(ctx):
-    guild_id = ctx.guild.id
-    count = StatsHolder.get_count(guild_id)
-    top = StatsHolder.top3_meetings(guild_id)
-    top_list = "\n".join([f"{idx + 1}.\t{start}\t{duration}" for idx, (start, duration) in enumerate(top)])
-    await ctx.send(f"Songs played: {count}\nTop 3 meetings:```{top_list}```")
-
-
-@bot.command(name="uptime", help="Shows how much the current meeting lasts")
-async def uptime(ctx):
-    user_voice = ctx.author.voice
-    if not user_voice:
-        await ctx.send("You're not connected to a voice channel!")
+@bot.command(
+    name="play",
+    help="Plays a song from YouTube. If search query - plays the first result",
+)
+async def play(ctx, *, query: str):
+    if not ctx.author.voice:
+        await ctx.send("You need to be in a voice channel to use this command.")
         return
 
-    time = meeting_tracker.current_meeting(user_voice.channel)
-    if time is not None:
-        await ctx.send(f"Meeting in {user_voice.channel.name} lasts {time}.")
+    channel = ctx.author.voice.channel
+
+    if not ctx.voice_client:
+        await channel.connect()
+    elif ctx.voice_client.channel != channel:
+        await ctx.voice_client.move_to(channel)
+
+    await ctx.send(f"Searching for: `{query}`...")
+
+    loop = asyncio.get_running_loop()
+    try:
+        with yt_dlp.YoutubeDL(YDL_OPTIONS) as ydl:
+            info = await loop.run_in_executor(
+                None, lambda: ydl.extract_info(query, download=False)
+            )
+            if "entries" in info:
+                if not info["entries"]:
+                    await ctx.send("No results found.")
+                    if not ctx.voice_client.is_playing():
+                        start_inactivity_timer(ctx)
+                    return
+                info = info["entries"][0]
+            url = info["url"]
+            title = info.get("title", "Unknown Title")
+    except Exception as e:
+        await ctx.send("An error occurred while fetching the song.")
+        print(f"Error extracting info: {e}")
+        if ctx.voice_client and not ctx.voice_client.is_playing():
+            start_inactivity_timer(ctx)
+        return
+
+    queue = get_queue(ctx.guild.id)
+
+    if ctx.voice_client.is_playing() or ctx.voice_client.is_paused():
+        queue.append((url, title))
+        await ctx.send(f"Added to queue: **{title}**")
+    else:
+        cancel_inactivity_timer(ctx.guild.id)
+        source = discord.FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
+        ctx.voice_client.play(
+            source,
+            after=lambda e: asyncio.run_coroutine_threadsafe(
+                play_next(ctx), bot.loop
+            ),
+        )
+        await ctx.send(f"Now playing: **{title}**")
 
 
-def is_admin(ctx):
-    return ctx.author.id == ADMIN_ID
+@bot.command(name="queue", help="Lists current queue")
+async def show_queue(ctx):
+    queue = get_queue(ctx.guild.id)
+    if not queue:
+        await ctx.send("The queue is currently empty.")
+        return
+
+    queue_list = "\n".join(
+        [f"{idx + 1}. {title}" for idx, (_, title) in enumerate(queue)]
+    )
+    await ctx.send(f"**Current Queue:**\n{queue_list}")
 
 
-@bot.command(name="createdb")
-@commands.check(is_admin)
-async def createdb(ctx):
-    StatsHolder.create_db()
-    print("Database created.")
+@bot.command(name="skip", help="Skips current song")
+async def skip(ctx):
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.stop()  # Triggers play_next via the 'after' callback
+        await ctx.send("Skipped the current song.")
+    else:
+        await ctx.send("No song is currently playing.")
 
 
-@bot.event
-async def on_voice_state_update(member, before, after):
-    duration = meeting_tracker.update_voice_state(member, before, after)
-    if duration:
-        guild = before.channel.guild
-        if guild.id in BOT_CHANNELS:
-            bot_channel_id = BOT_CHANNELS[guild.id]
-            bot_channel = guild.get_channel(bot_channel_id)
-            if bot_channel:
-                await bot_channel.send(f"Meeting in {before.channel.name} lasted {duration}.")
+@bot.command(name="stop", help="Stops the current song")
+async def stop(ctx):
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        queue = get_queue(ctx.guild.id)
+        queue.clear()
+        ctx.voice_client.stop()  # Triggers play_next, which starts the inactivity timer
+        await ctx.send("Stopped playback and cleared the queue.")
+    else:
+        await ctx.send("No song is currently playing.")
 
 
-log_filename = f"logs\\discord.{datetime.today().strftime('%Y-%m-%d')}.log"
-handler = logging.FileHandler(filename=log_filename, encoding="utf-8", mode="w")
-bot.run(DISCORD_TOKEN, log_handler=handler, log_level=logging.WARN)
+@bot.command(name="clear", help="Clears the queue")
+async def clear(ctx):
+    queue = get_queue(ctx.guild.id)
+    queue.clear()
+    await ctx.send("Cleared the queue.")
+
+
+@bot.command(name="leave", help="Makes the bot leave the voice channel")
+async def leave(ctx):
+    if ctx.voice_client:
+        cancel_inactivity_timer(ctx.guild.id)
+        queue = get_queue(ctx.guild.id)
+        queue.clear()
+        await ctx.voice_client.disconnect()
+        await ctx.send("Disconnected from the voice channel.")
+    else:
+        await ctx.send("I am not in a voice channel.")
+
+
+if __name__ == "__main__":
+    if not TOKEN:
+        raise ValueError("No TOKEN found in environment variables.")
+    bot.run(TOKEN)

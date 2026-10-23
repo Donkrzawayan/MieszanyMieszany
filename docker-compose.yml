@@ -1,0 +1,8 @@
+services:
+  music-bot:
+    build: .
+    container_name: mieszany-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+  command: sh -c "pip install --no-cache-dir -U yt-dlp && python -u app.py"
